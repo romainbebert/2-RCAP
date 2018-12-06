@@ -17,10 +17,6 @@
 		elite
 		First gen created partially at random and partially with GRASP (or vOPT)
 
-	Solution's representation :
-		Array of nbEntrepots values from 1 to nbEntrepots to represent the space to which a warehouse is attributed
-
-	Since the solutions are created as the array of 1 to nbEntrepots shuffled, no constraint checking seems necessary when computing fitness
 =#
 
 #------------------- Type(s) definitions ---------------------------
@@ -31,7 +27,7 @@ type Generation {
 	ranking::Array{Int64} #Rank for each solution
 	mchance::Float64 #Mutation chance
 	gen_mean::Float64 #Fitness mean for this generation
-	gen_best::Int64 #Best fitnesses of the generation
+	gen_best::Int64 #Best fitnesses of the solutions
 	fittest::Array{Int64,1} #Best solutions of the generation (probable duplicate with gen_best but it makes some things easier to code)
 }
 
