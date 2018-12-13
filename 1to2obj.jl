@@ -30,9 +30,11 @@ function createInstance(fname)
     C2 = shuffle(C1)
     limit::Int = floor(sum(C1)/2)
 
+    #=
     println(m, " ", limit)
     println(C1)
     println(C2)
     println(weights)
+    =#
     writedlm(string("Instances2obj/",m,"_",limit),[C1;C2;weights], " ")
 end
