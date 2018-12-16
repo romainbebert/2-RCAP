@@ -19,28 +19,42 @@
 
 =#
 
+#----------------------	  Packages	------------------------------	
+using Random 
+
 #------------------- Type(s) definitions ---------------------------
 
-type Generation {
+mutable struct Generation
     nbInd::Int64
-	people::Array{Array{Int64,1},1} #Population of solutions
-	ranking::Array{Int64} #Rank for each solution
-	mchance::Float64 #Mutation chance
-	gen_mean::Float64 #Fitness mean for this generation
-	gen_best::Int64 #Best fitnesses of the solutions
-	fittest::Array{Int64,1} #Best solutions of the generation (probable duplicate with gen_best but it makes some things easier to code)
-}
+	people::Array{BitArray} #Population of solutions
+	ranking::Array{Int} #Rank for each solution
+	mchance::AbstractFloat #Mutation chance
+	gen_mean::AbstractFloat #Fitness mean for this generation
+	gen_best::Int #Best fitnesses of the solutions (to replace with the pareto front ?)
+end
+
+struct Problem_Variables
+	n::Int
+	c1::Array{Int}
+	c2::Array{Int}
+	weights::Array{Int}
+	limit::Int
+end
 
 
-#Number of individuals, optional starting pop, percent of randomised individuals, problem specific variables
-function firstGen(nbInd, startingPop = [], randpercent, costs, duedates) {
-    if startingPop == []
-        for i in 1:nbInd
-            push!(startingPop, rand(bounds.inf, bounds.sup))
-        end
-    else 
-        for i in 1:(nbInd-startingPop.size)
-            push!(startingPop, rand(bounds.inf, bounds.sup))
-        end
+#Number of individuals, problem specific variables
+function firstGen(nbInd::Int, vars::Problem_Variables)
+	
+	startingPop::Array{BitArray} = []
+
+    for i = 1:nbInd 
+    	push!(startingPop, bitrand(vars.n)) 
     end
-}
+
+    println(startingPop)
+end
+
+
+function updateRanks(gen::Generation, vars::Problem_Variables)
+
+end
