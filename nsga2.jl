@@ -82,9 +82,10 @@ function NDsort(gen::Generation, vars::Problem_Variables)
 	gen.ranking = zeros(Int, size(gen.people,1))
 	for i = 1:size(gen.people,1)
 		obji = getObjectiveValues(gen.people[i],vars)
+		istate = isValid(gen.people[i], vars)
 		for j = 1:size(gen.people,1)
 			objj = getObjectiveValues(gen.people[j],vars)
-			istate, jstate = isValid(gen.people[i], vars), isValid(gen.people[j], vars)
+			jstate =  isValid(gen.people[j], vars)
 			
 			#Dominance test (validity is included in the test)
 			if istate != jstate
@@ -271,22 +272,22 @@ end
 
 #local search in the 1-swap neighbourghood (to improve, takes way too long)
 function localsearch(x::BitArray{2}, vars::Problem_Variables)
-	newX =  x 
+	acceptedX =  x 
 	tmpSol = x
 	if isValid(x, vars)
 		for i = 1:size(x,1)
 			for j = i:size(x,1)
 				tmpSol[i] = x[j]
 				tmpSol[j] = x[i]
-
-				if isValid(tmpSol,vars) && getObjectiveValues(tmpSol,vars) < getObjectiveValues(newX, vars)
-					println("Yay, improvement has been made !")
-					newX = tmpSol
+				tmp1, tmp2 = getObjectiveValues(tmpSol,vars)
+				acc1, acc2 = getObjectiveValues(acceptedX, vars)
+				if isValid(tmpSol,vars) && tmp1 < acc1 && tmp2 < acc2
+					acceptedX = tmpSol
 				end
 			end
 		end
 
-		x = newX 
+		x = acceptedX 
 	end
 
 	return x
@@ -299,7 +300,7 @@ end
 #-------------------------- Core Functions -------------------------
 
 # args : number of individuals, problem variables and optionnal stop condition (number of generations)
-function nsga2(fname, nbInd::Int, nbGen::Int = 100, mchance::Float64 = 0.01)
+function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01)
 	
 	#Getting Problem variables
 	n, lim, c1, c2, weights = load2RCAP(fname)
@@ -365,14 +366,14 @@ function nsga2(fname, nbInd::Int, nbGen::Int = 100, mchance::Float64 = 0.01)
 			while size(newPop,1) < gen.nbInd
 				push!(newPop, gen.people[gen.fronts[k][l]])
 			end
-			println("New Pop size : ",size(newPop,1))
 		end
+		println("New Pop size : ",size(newPop,1))
 
 		gen.people = newPop
 
-#		for i = 1:gen.nbInd
-#			gen.people[i] = localsearch(gen.people[i], vars)
-#		end
+		for i = 1:gen.nbInd
+			gen.people[i] = localsearch(gen.people[i], vars)
+		end
 
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
@@ -384,7 +385,7 @@ function nsga2(fname, nbInd::Int, nbGen::Int = 100, mchance::Float64 = 0.01)
 		println("Objective values : ", map(x -> getObjectiveValues(gen.people[x],vars), gen.fronts[1]),"\n")
 	end
 
-	printgraph(gen, vars)
+	printgraph(gen, vars,nbGen)
 
 end
 
