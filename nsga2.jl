@@ -381,6 +381,7 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 			l = 1
 			while size(newPop,1) < gen.nbInd
 				push!(newPop, gen.people[gen.fronts[k][l]])
+				l += 1
 			end
 		end
 
