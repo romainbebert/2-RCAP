@@ -56,9 +56,14 @@ end
 #Number of individuals, problem specific variables
 function firstGen(nbInd::Int, vars::Problem_Variables)	
 	startingPop::Array{BitArray} = []
+	model = falses(vars.n,vars.n)
 	println("Creating first Gen...")
-    while size(startingPop,1) < nbInd
-    	tmp = bitrand(vars.n,vars.n)
+	while size(startingPop,1) < nbInd
+		mask = randperm(vars.n)
+		tmp = model
+		for i = 1:vars.n 
+			tmp[i,mask[i]] = 1
+		end
     	#if isValid(tmp,vars)
     		push!(startingPop,tmp)
     	#end
@@ -177,6 +182,9 @@ end
 #Selection by binary tournament (returns indexes of the solutions)
 function tournament(gen::Generation)
 	p1,p2 = rand(1:size(gen.people,1)), rand(1:size(gen.people,1))
+	while p1 == p2 
+		p2 = rand(1:size(gen.people,1))
+	end
 	if gen.ranking[p1] < gen.ranking[p2]
 		return p1 
 	elseif gen.ranking[p1] > gen.ranking[p2]
@@ -227,7 +235,6 @@ function mutation(x::BitArray{2}, vars::Problem_Variables)
 	x[swap1] = x[swap2]
 	x[swap2] = tmp
 
-	#Si la mutation détruit la solution, on renvoie simplement l'ancienne valeur
 	return x
 end
 
@@ -289,6 +296,7 @@ function localsearch(x::BitArray{2}, vars::Problem_Variables)
 	i = 1
 	acc1, acc2 = getObjectiveValues(x, vars)
 	tmp1, tmp2 = acc1, acc2
+
 	while i < size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
 		j = i+1
 		while j <= size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
@@ -336,6 +344,9 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 	
 	NDsort(gen, vars)
 	crowdingDistance(gen, vars)
+	for i = 1:gen.nbInd
+		gen.people[i] = localsearch(gen.people[i], vars)
+	end
 	printgraph(gen, vars,0)
 	
 	for i = 1:nbGen
@@ -349,10 +360,10 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 			c1,c2 = two_point_crossover(gen.people[p1],gen.people[p2], vars)
 
 			if rand() < gen.mchance 
-				c1 = mutation(c1, vars)
+				c1 = localsearch(c1, vars)
 			end
 			if rand() < gen.mchance
-				c2 = mutation(c2, vars)
+				c2 = localsearch(c2, vars)
 			end
 
 			push!(offsprings, c1)
@@ -386,19 +397,22 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 		end
 
 		gen.people = newPop
+		#=
 		println("Starting localsearch")
 		for i = 1:gen.nbInd
 			gen.people[i] = localsearch(gen.people[i], vars)
 		end
 		println("Localsearch done")
+		=#
 
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
 		println("Ranked the new set !")
 
-		if i%10 == 0
+		#if i%10 == 0
 			printgraph(gen, vars,i)
-		end
+		#end
+		#readline()
 		println("Pareto front : ", gen.fronts[1])
 		println("Objective values : ", map(x -> getObjectiveValues(gen.people[x],vars), gen.fronts[1]),"\n")
 	end
@@ -416,7 +430,7 @@ function printgraph(gen::Generation, vars::Problem_Variables, genNb::Int)
 			 map(x -> getObjectiveValues(gen.people[x], vars)[2], gen.fronts[i]), "r.")
 	end
 	show()
-	savefig(string("plots/",vars.n,"_",vars.limit,"gen",genNb,".svg"))
+	#savefig(string("plots/",vars.n,"_",vars.limit,"gen",genNb,".svg"))
 end
 
 #=
