@@ -31,11 +31,6 @@ function load2RCAP(fname)
         end
     end
 
-    #=
-    println(m, " ", lim)
-    println(C1)
-    println(C2)
-    println(weights)
-    =#
+    println("Done parsing instance data !\n")
     return m,lim,C1,C2,weights
 end

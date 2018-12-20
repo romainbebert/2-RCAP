@@ -29,7 +29,7 @@ include("load2RCAP.jl")
 mutable struct Generation
     nbInd::Int
 	people::Array{BitArray} #Population of solutions
-	ranking::Array{Int} #Rank for each solution (might be useless)
+	ranking::Array{UInt16} #Rank for each solution (might be useless)
 	fronts::Array{Array{Int}} #List of pareto fronts (fronts[i] is rank i)
 	crowddist::Array{Float64} #List of crowding distances (crowddist[i] is rank i)
 	mchance::Float64 #Mutation chance (from 0 to 1)
@@ -56,14 +56,14 @@ end
 #Number of individuals, problem specific variables
 function firstGen(nbInd::Int, vars::Problem_Variables)	
 	startingPop::Array{BitArray} = []
-
+	println("Creating first Gen...")
     while size(startingPop,1) < nbInd
     	tmp = bitrand(vars.n,vars.n)
-    	if isValid(tmp,vars)
+    	#if isValid(tmp,vars)
     		push!(startingPop,tmp)
-    	end
+    	#end
     end
-
+    println("Done !")
     return startingPop
 end
 
@@ -92,7 +92,7 @@ function NDsort(gen::Generation, vars::Problem_Variables)
 				if istate > jstate
 					push!(S[i],j)
 				else 
-					 n[i] += 1
+					n[i] += 1
 				end
 			elseif obji[1] < objj[1] && obji[2] < objj[2]
 				push!(S[i],j)
@@ -148,8 +148,8 @@ function crowdingDistance(gen::Generation, vars::Problem_Variables)
 
 	while size(gen.fronts[i],1) != 0 && i < size(gen.people,1)
 
-		f1 = sort(gen.fronts[i], by = x -> getObjectiveValues(gen.people[x],vars)[1]) 
-		f2 = sort(gen.fronts[i], by = x -> getObjectiveValues(gen.people[x],vars)[2]) 
+		f1 = sort(gen.fronts[i], by = x -> getObjectiveValues(gen.people[x],vars)[1], alg=Base.Sort.QuickSort) 
+		f2 = sort(gen.fronts[i], by = x -> getObjectiveValues(gen.people[x],vars)[2], alg=Base.Sort.QuickSort) 
 
 		gen.crowddist[f1[1]] = Base.Inf
 		gen.crowddist[f1[size(f1,1)]] = Base.Inf
@@ -256,38 +256,52 @@ end
 function isValid(x::BitArray{2}, vars::Problem_Variables)
 	i = 1
 	j = 1
-	total = 0
+	totalW = 0 #weight of the tasks
+	sumM = 0 #sum of assignements per machine
+	sumT = 0 #sum of machine per task
 
-	while i <= vars.n && total <= vars.limit 
-		total = 0
-		while j <= vars.n && total <= vars.limit 
-			total += vars.weights[i,j]*x[i,j]
+	while i <= vars.n && totalW <= vars.limit && sumM <= 1
+		sumM = 0
+		j = 1
+		while j <= vars.n && totalW <= vars.limit && sumM <= 1
+			totalW += vars.weights[i,j]*x[i,j]
+			sumM += x[i,j]
+			j += 1
+		end
+		i += 1
+	end
+	i = 1
+	while i <= vars.n && totalW <= vars.limit && sumM <= 1 && sumT <= 1
+		sumT = 0
+		j = 1
+		while j <= vars.n && totalW <= vars.limit && sumM <= 1 && sumT <= 1
+			sumT += x[j,i]
 			j += 1
 		end
 		i += 1
 	end
 
-	return total <= vars.limit
+	return totalW <= vars.limit && sumM == 1 && sumT == 1
 end
 
 #local search in the 1-swap neighbourghood (to improve, takes way too long)
 function localsearch(x::BitArray{2}, vars::Problem_Variables)
-	acceptedX =  x 
-	tmpSol = x
-	if isValid(x, vars)
-		for i = 1:size(x,1)
-			for j = i:size(x,1)
-				tmpSol[i] = x[j]
-				tmpSol[j] = x[i]
-				tmp1, tmp2 = getObjectiveValues(tmpSol,vars)
-				acc1, acc2 = getObjectiveValues(acceptedX, vars)
-				if isValid(tmpSol,vars) && tmp1 < acc1 && tmp2 < acc2
-					acceptedX = tmpSol
-				end
+	i = 1
+	acc1, acc2 = getObjectiveValues(x, vars)
+	tmp1, tmp2 = acc1, acc2
+	while i < size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
+		j = i+1
+		while j <= size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
+			tmpSol = x
+			tmpSol[i] = x[j]
+			tmpSol[j] = x[i]
+			tmp1, tmp2 = getObjectiveValues(tmpSol,vars)
+			if isValid(tmpSol,vars) && tmp1 < acc1 && tmp2 < acc2
+				x = tmpSol
 			end
+			j += 1
 		end
-
-		x = acceptedX 
+		i += 1
 	end
 
 	return x
@@ -314,6 +328,7 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 	xlim(0, getObjectiveValues(trues(vars.n,vars.n), vars)[1])
 	ylim(0, getObjectiveValues(trues(vars.n,vars.n), vars)[2])
 	show()
+
 	#initiating first generation
 	gen = Generation(nbInd,firstGen(nbInd,vars),zeros(Int,nbInd),[Int[] for i=1:nbInd], zeros(Float64,nbInd),mchance,0,0,0,0)
 	gen.best1, gen.best2 = getObjectiveValues(gen.people[1], vars)
@@ -321,7 +336,8 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 	
 	NDsort(gen, vars)
 	crowdingDistance(gen, vars)
-		
+	printgraph(gen, vars,0)
+	
 	for i = 1:nbGen
 		println("----------", i,"th Generation Starting ----------")
 		offsprings = []
@@ -343,10 +359,10 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 			push!(offsprings, c2)
 		end	
 
-		gen.people = union(gen.people,offsprings)
+		gen.people = cat(gen.people,offsprings,dims=1)
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
-
+		println("Ranked everything")
 		k=1
 		newPop = []
 
@@ -367,16 +383,17 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 				push!(newPop, gen.people[gen.fronts[k][l]])
 			end
 		end
-		println("New Pop size : ",size(newPop,1))
 
 		gen.people = newPop
-
+		println("Starting localsearch")
 		for i = 1:gen.nbInd
 			gen.people[i] = localsearch(gen.people[i], vars)
 		end
+		println("Localsearch done")
 
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
+		println("Ranked the new set !")
 
 		if i%10 == 0
 			printgraph(gen, vars,i)
