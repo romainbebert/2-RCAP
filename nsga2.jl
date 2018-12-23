@@ -22,13 +22,14 @@
 #----------------------	  Packages	------------------------------	
 using Random 
 using PyPlot
+using vOptSpecific
 include("load2RCAP.jl")
 
 #------------------- Type(s) definitions ---------------------------
 
 mutable struct Generation
     nbInd::Int
-	people::Array{BitArray} #Population of solutions
+	people::Array{Array{Int}} #Population of solutions
 	ranking::Array{UInt16} #Rank for each solution (might be useless)
 	fronts::Array{Array{Int}} #List of pareto fronts (fronts[i] is rank i)
 	crowddist::Array{Float64} #List of crowding distances (crowddist[i] is rank i)
@@ -55,18 +56,10 @@ end
 
 #Number of individuals, problem specific variables
 function firstGen(nbInd::Int, vars::Problem_Variables)	
-	startingPop::Array{BitArray} = []
-	model = falses(vars.n,vars.n)
+	startingPop = []
 	println("Creating first Gen...")
 	while size(startingPop,1) < nbInd
-		mask = randperm(vars.n)
-		tmp = model
-		for i = 1:vars.n 
-			tmp[i,mask[i]] = 1
-		end
-    	#if isValid(tmp,vars)
-    		push!(startingPop,tmp)
-    	#end
+    	push!(startingPop,shuffle(1:vars.n))
     end
     println("Done !")
     return startingPop
@@ -99,9 +92,9 @@ function NDsort(gen::Generation, vars::Problem_Variables)
 				else 
 					n[i] += 1
 				end
-			elseif obji[1] < objj[1] && obji[2] < objj[2]
+			elseif obji[1] <= objj[1] && obji[2] <= objj[2]
 				push!(S[i],j)
-			elseif obji[1] > objj[1] && obji[2] > objj[2]
+			elseif obji[1] >= objj[1] && obji[2] >= objj[2]
 				n[i] += 1
 			end
 		end
@@ -195,30 +188,63 @@ function tournament(gen::Generation)
 end
 
 
-function two_point_crossover(p1::BitArray{2}, p2::BitArray{2}, vars::Problem_Variables)
+function two_point_crossover(p1::Array{Int}, p2::Array{Int}, vars::Problem_Variables)
 	
-	cut_a = cut_b = rand(2:size(p1,1)-1)
-	c1 = c2 = bitrand(vars.n,vars.n)
+	cut_a = cut_b = rand(2:vars.n-1)
+	c1 = c2 = 1:vars.n
 
 	while cut_a == cut_b 
-		cut_b = rand(2:size(p1,1)-1)
+		cut_b = rand(2:vars.n-1)
 	end
 
 	cut_a,cut_b = minmax(cut_a,cut_b)
 
 	copyto!(c1, 1, p1, 1, cut_a-1)
 	copyto!(c1, cut_a, p2, cut_a, cut_b-cut_a+1)
-	copyto!(c1, cut_b+1, p1, cut_b+1, size(p1,1)-cut_b)
+	copyto!(c1, cut_b+1, p1, cut_b+1, vars.n-cut_b)
 
 	copyto!(c2, 1, p2, 1, cut_a-1)
 	copyto!(c2, cut_a, p1, cut_a, cut_b-cut_a+1)
-	copyto!(c2, cut_b+1, p2, cut_b+1, size(p1,1)-cut_b)
+	copyto!(c2, cut_b+1, p2, cut_b+1, vars.n-cut_b)
 
 	return c1,c2
 end
 
-#Mutation by swapping
-function mutation(x::BitArray{2}, vars::Problem_Variables)
+#= Etapes Ordered Crossover (OX) :
+	- Choisir deux points de coupe
+	- Enfant 1 prend la partie coupée de parent1
+	- Enfant 1 récupère les éléments de parent2 ne se trouvant pas dans subseq1
+	- Idem pour Enfant 2 en inversant les parents
+=#
+function OX_crossover(p1::Array{Int},p2::Array{Int},vars::Problem_Variables)
+	nbVar = size(p1,1)
+	num1 = rand(1:nbVar)
+	num2 = rand(1:nbVar)
+	deb = min(num1, num2)
+	fin = max(num1, num2)
+	c1 = zeros(Int64,nbVar); c2 = zeros(Int64,nbVar)
+
+	subseq1 = p1[deb:fin]
+	subseq2 = p2[deb:fin]
+	c1[deb:fin] = subseq1
+	c2[deb:fin] = subseq2
+	remaining1 = filter(x -> !in(x,subseq1), p2)
+	remaining2 = filter(x -> !in(x,subseq2), p1)
+
+	for i in 1:nbVar
+		if c1[i] == 0
+			c1[i] = popfirst!(remaining1)
+		end
+		if c2[i] == 0
+			c2[i] = popfirst!(remaining2)
+		end
+	end
+
+	return c1,c2
+end
+
+#Mutation by random swapping
+function mutation(x::Array{Int}, vars::Problem_Variables)
 	nbVar = size(x,1)
 	oldX = x
 
@@ -245,14 +271,12 @@ end
 #---------------------- PB specific Operators ----------------------
 
 
-function getObjectiveValues(x::BitArray{2}, vars::Problem_Variables)
+function getObjectiveValues(x::Array{Int}, vars::Problem_Variables)
 	z1 = 0
 	z2 = 0
 	for i = 1:vars.n
-		for j = 1:vars.n 
-			z1 += vars.c1[i,j]*x[i,j]
-			z2 += vars.c2[i,j]*x[i,j]
-		end
+		z1 += vars.c1[i,x[i]]
+		z2 += vars.c2[i,x[i]]
 	end
 
 	#println("z1 = ",z1,"; z2 = ", z2)
@@ -260,47 +284,28 @@ function getObjectiveValues(x::BitArray{2}, vars::Problem_Variables)
 end
 
 
-function isValid(x::BitArray{2}, vars::Problem_Variables)
+function isValid(x::Array{Int}, vars::Problem_Variables)
 	i = 1
-	j = 1
-	totalW = 0 #weight of the tasks
-	sumM = 0 #sum of assignements per machine
-	sumT = 0 #sum of machine per task
+	total = 0 #weight of the tasks
 
-	while i <= vars.n && totalW <= vars.limit && sumM <= 1
-		sumM = 0
-		j = 1
-		while j <= vars.n && totalW <= vars.limit && sumM <= 1
-			totalW += vars.weights[i,j]*x[i,j]
-			sumM += x[i,j]
-			j += 1
-		end
-		i += 1
-	end
-	i = 1
-	while i <= vars.n && totalW <= vars.limit && sumM <= 1 && sumT <= 1
-		sumT = 0
-		j = 1
-		while j <= vars.n && totalW <= vars.limit && sumM <= 1 && sumT <= 1
-			sumT += x[j,i]
-			j += 1
-		end
+	while i <= vars.n && total <= vars.limit
+		total += vars.weights[i,x[i]]
 		i += 1
 	end
 
-	return totalW <= vars.limit && sumM == 1 && sumT == 1
+	return total <= vars.limit
 end
 
 #local search in the 1-swap neighbourghood (to improve, takes way too long)
-function localsearch(x::BitArray{2}, vars::Problem_Variables)
+function localsearch(x::Array{Int}, vars::Problem_Variables)
 	i = 1
 	acc1, acc2 = getObjectiveValues(x, vars)
 	tmp1, tmp2 = acc1, acc2
 
 	while i < size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
-		j = i+1
-		while j <= size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
-			tmpSol = x
+		j = 1
+		while j < size(x,1) && (tmp1 >= acc1 || tmp2 >= acc2)
+			tmpSol = deepcopy(x)
 			tmpSol[i] = x[j]
 			tmpSol[j] = x[i]
 			tmp1, tmp2 = getObjectiveValues(tmpSol,vars)
@@ -322,7 +327,7 @@ end
 #-------------------------- Core Functions -------------------------
 
 # args : number of individuals, problem variables and optionnal stop condition (number of generations)
-function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01)
+function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.1, progress = false)
 	
 	#Getting Problem variables
 	n, lim, c1, c2, weights = load2RCAP(fname)
@@ -333,9 +338,9 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 	title("Espace des objectifs")
 	xlabel("z1")
 	ylabel("z2")
-	xlim(0, getObjectiveValues(trues(vars.n,vars.n), vars)[1])
-	ylim(0, getObjectiveValues(trues(vars.n,vars.n), vars)[2])
 	show()
+	xlim(0, sum(c1))
+	ylim(0, sum(c2))
 
 	#initiating first generation
 	gen = Generation(nbInd,firstGen(nbInd,vars),zeros(Int,nbInd),[Int[] for i=1:nbInd], zeros(Float64,nbInd),mchance,0,0,0,0)
@@ -348,6 +353,7 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 		gen.people[i] = localsearch(gen.people[i], vars)
 	end
 	printgraph(gen, vars,0)
+	println(gen.people)
 	
 	for i = 1:nbGen
 		println("----------", i,"th Generation Starting ----------")
@@ -357,7 +363,7 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 			p1 = tournament(gen)
 			p2 = tournament(gen)
 
-			c1,c2 = two_point_crossover(gen.people[p1],gen.people[p2], vars)
+			c1,c2 = OX_crossover(gen.people[p1],gen.people[p2], vars)
 
 			if rand() < gen.mchance 
 				c1 = localsearch(c1, vars)
@@ -370,7 +376,8 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 			push!(offsprings, c2)
 		end	
 
-		gen.people = cat(gen.people,offsprings,dims=1)
+		#Here we use "unique" to remove multiple instances of a solution that might erase some pareto values
+		gen.people = unique(cat(gen.people,offsprings,dims=1))
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
 		println("Ranked everything")
@@ -397,40 +404,82 @@ function nsga2(fname, nbInd::Int = 50, nbGen::Int = 100, mchance::Float64 = 0.01
 		end
 
 		gen.people = newPop
-		#=
-		println("Starting localsearch")
-		for i = 1:gen.nbInd
-			gen.people[i] = localsearch(gen.people[i], vars)
-		end
-		println("Localsearch done")
-		=#
+		
 
 		NDsort(gen, vars)
 		crowdingDistance(gen, vars)
 		println("Ranked the new set !")
 
-		#if i%10 == 0
+		println("Starting localsearch")
+		for i = 1:2
+			map(x -> localsearch(gen.people[x], vars),gen.fronts[i])
+		end
+		println("Localsearch done")
+
+		if i%10 == 0 && progress
 			printgraph(gen, vars,i)
-		#end
+		end
 		#readline()
 		println("Pareto front : ", gen.fronts[1])
 		println("Objective values : ", map(x -> getObjectiveValues(gen.people[x],vars), gen.fronts[1]),"\n")
 	end
 
 	printgraph(gen, vars,nbGen)
-
+	#vOptSolution(vars)
 end
 
 function printgraph(gen::Generation, vars::Problem_Variables, genNb::Int)
 	clf()
 	plot(map(x -> getObjectiveValues(gen.people[x], vars)[1], gen.fronts[1]), 
-		 map(x -> getObjectiveValues(gen.people[x], vars)[2], gen.fronts[1]), "gs")
+		 map(x -> getObjectiveValues(gen.people[x], vars)[2], gen.fronts[1]), "go")
 	for i = 2:gen.nbInd
 		plot(map(x -> getObjectiveValues(gen.people[x], vars)[1], gen.fronts[i]), 
 			 map(x -> getObjectiveValues(gen.people[x], vars)[2], gen.fronts[i]), "r.")
 	end
 	show()
-	#savefig(string("plots/",vars.n,"_",vars.limit,"gen",genNb,".svg"))
+	savefig(string("plots/",vars.n,"_",vars.limit,"/gen",genNb,".svg"))
+end
+
+
+#Résoud un 2LAP sans limite de poids
+function vOptSolution(vars::Problem_Variables)
+	figure("Graphe vOpt",figsize=(6,6)) # Create a new figure
+	title("Espace des objectifs")
+	xlabel("z1")
+	ylabel("z2")
+	clf()
+	#Solver is already Przybylski2008 by default
+	z1,z2, S = vSolve(set2LAP(vars.n,vars.c1,vars.c2))
+	plot(z1,z2, "go")
+	savefig(string("plots/",vars.n,"_",vars.limit,"/vOptSpecific.svg"))
+	show()	
+end
+
+using vOptGeneric
+using GLPK,GLPKMathProgInterface
+#Résoud le problème du sujet et affiche Y_N
+function vOptGenericSolution(vars::Problem_Variables)
+
+	model = vModel(solver = GLPKSolverMIP())
+
+	@variable(model, x[1:vars.n, 1:vars.n], Bin)
+	@addobjective(model, Min, sum(vars.c1[i,j]*x[i,j] for i=1:vars.n, j=1:vars.n))
+	@addobjective(model, Min, sum(vars.c2[i,j]*x[i,j] for i=1:vars.n, j=1:vars.n))
+	@constraint(model, sum(vars.weights[i,j]*x[i,j] for i=1:vars.n, j=1:vars.n) <= vars.limit)
+	@constraint(model, cols[i=1:vars.n], sum(x[i,j] for j=1:vars.n) == 1 )
+	@constraint(model, rows[j=1:vars.n], sum(x[i,j] for i=1:vars.n) == 1 )
+
+	solve(model, method = :epsilon, step = 0.5)
+	
+	Y_N = getY_N(model)
+	f1 = map(y -> y[1], Y_N)
+	f2 = map(y -> y[2], Y_N)
+	figure("Graphe vOpt",figsize=(6,6)) # Create a new figure
+	title("Espace des objectifs")
+	xlabel("z1")
+	ylabel("z2")
+	plot(f1,f2, "go")
+	show()
 end
 
 #=
